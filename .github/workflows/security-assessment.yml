@@ -1,0 +1,184 @@
+name: 🔒 Comprehensive Security Assessment
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run security scans daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target domain/IP to scan'
+        required: true
+        default: 'riskcontrolnigeria.com'
+      scan_type:
+        description: 'Type of scan to perform'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+        - 'full'
+        - 'network'
+        - 'web'
+        - 'ssl'
+        - 'subdomain'
+      max_ports:
+        description: 'Maximum number of ports to scan (1-65535)'
+        required: false
+        default: '1000'
+
+env:
+  PYTHON_VERSION: '3.11'
+  RESULTS_DIR: 'security_results'
+  
+jobs:
+  security-assessment:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    
+    steps:
+    - name: 🔄 Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: 📦 Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests dnspython python-nmap beautifulsoup4
+        
+    - name: 📁 Create Results Directory
+      run: |
+        mkdir -p ${{ env.RESULTS_DIR }}
+        chmod 755 ${{ env.RESULTS_DIR }}
+    
+    - name: 🌐 Network Security Scan
+      if: ${{ github.event.inputs.scan_type == 'full' || github.event.inputs.scan_type == 'network' }}
+      run: |
+        TARGET="${{ github.event.inputs.target || 'riskcontrolnigeria.com' }}"
+        MAX_PORTS="${{ github.event.inputs.max_ports || '1000' }}"
+        
+        echo "🔍 Running network scan on $TARGET (ports 1-$MAX_PORTS)"
+        python network_scanner.py "$TARGET" \
+          --ports "1-$MAX_PORTS" \
+          --threads 50 \
+          --output "${{ env.RESULTS_DIR }}/network_scan.json" || true
+        
+        if [ -f "${{ env.RESULTS_DIR }}/network_scan.json" ]; then
+          echo "✅ Network scan completed"
+        else
+          echo "❌ Network scan failed or produced no results"
+        fi
+    
+    - name: 🌐 Web Application Security Test
+      if: ${{ github.event.inputs.scan_type == 'full' || github.event.inputs.scan_type == 'web' }}
+      run: |
+        TARGET="${{ github.event.inputs.target || 'riskcontrolnigeria.com' }}"
+        
+        echo "🔍 Running web security test on $TARGET"
+        python web_security_tester.py "https://$TARGET" \
+          --output "${{ env.RESULTS_DIR }}/web_security.json" || true
+        
+        if [ ! -f "${{ env.RESULTS_DIR }}/web_security.json" ]; then
+          echo "🔄 Retrying with HTTP..."
+          python web_security_tester.py "http://$TARGET" \
+            --output "${{ env.RESULTS_DIR }}/web_security.json" || true
+        fi
+        
+        if [ -f "${{ env.RESULTS_DIR }}/web_security.json" ]; then
+          echo "✅ Web security test completed"
+        else
+          echo "❌ Web security test failed or produced no results"
+        fi
+    
+    - name: 🔐 SSL/TLS Security Analysis
+      if: ${{ github.event.inputs.scan_type == 'full' || github.event.inputs.scan_type == 'ssl' }}
+      run: |
+        TARGET="${{ github.event.inputs.target || 'riskcontrolnigeria.com' }}"
+        
+        echo "🔍 Running SSL/TLS analysis on $TARGET"
+        python ssl_tls_analyzer.py "$TARGET" \
+          --output "${{ env.RESULTS_DIR }}/ssl_analysis.json" || true
+        
+        if [ -f "${{ env.RESULTS_DIR }}/ssl_analysis.json" ]; then
+          echo "✅ SSL/TLS analysis completed"
+        else
+          echo "❌ SSL/TLS analysis failed or produced no results"
+        fi
+    
+    - name: 🔍 Subdomain Enumeration
+      if: ${{ github.event.inputs.scan_type == 'full' || github.event.inputs.scan_type == 'subdomain' }}
+      run: |
+        TARGET="${{ github.event.inputs.target || 'riskcontrolnigeria.com' }}"
+        
+        echo "🔍 Running subdomain enumeration on $TARGET"
+        python subdomain_enumerator.py "$TARGET" \
+          --threads 30 \
+          --output "${{ env.RESULTS_DIR }}/subdomain_enum.json" || true
+        
+        if [ -f "${{ env.RESULTS_DIR }}/subdomain_enum.json" ]; then
+          echo "✅ Subdomain enumeration completed"
+        else
+          echo "❌ Subdomain enumeration failed or produced no results"
+        fi
+    
+    - name: 📊 Generate Comprehensive Report
+      run: |
+        echo "📊 Generating comprehensive security report..."
+        
+        python security_report_generator.py \
+          --results-dir "${{ env.RESULTS_DIR }}" \
+          --output-html "${{ env.RESULTS_DIR }}/security_report.html" \
+          --output-json "${{ env.RESULTS_DIR }}/security_report.json" || true
+        
+        if [ -f "${{ env.RESULTS_DIR }}/security_report.json" ]; then
+          echo "✅ Security report generated successfully"
+          echo "## 🔒 Security Assessment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:** ${{ github.event.inputs.target || 'riskcontrolnigeria.com' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Scan Type:** ${{ github.event.inputs.scan_type || 'full' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📋 Detailed security report available in artifacts" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ Failed to generate security report"
+          echo "## ❌ Security Assessment Failed" >> $GITHUB_STEP_SUMMARY
+          echo "The security assessment could not be completed. Please check the logs for details." >> $GITHUB_STEP_SUMMARY
+        fi
+    
+    - name: 📤 Upload Security Reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: security-assessment-reports
+        path: ${{ env.RESULTS_DIR }}/
+        retention-days: 30
+    
+    - name: 🚨 Security Alert Check
+      if: always()
+      run: |
+        if [ -f "${{ env.RESULTS_DIR }}/security_report.json" ]; then
+          echo "🔍 Checking for critical security issues..."
+          
+          # Simple check for critical issues (can be enhanced)
+          if grep -q '"severity": "Critical"' "${{ env.RESULTS_DIR }}/security_report.json"; then
+            echo "🚨 SECURITY ALERT: Critical vulnerabilities detected!"
+            echo "::warning title=Critical Security Issues::Critical security vulnerabilities were discovered. Please review the security report immediately."
+            exit 1
+          elif grep -q '"severity": "High"' "${{ env.RESULTS_DIR }}/security_report.json"; then
+            echo "⚠️ High severity issues detected - review recommended"
+            echo "::warning title=High Security Issues::High severity security issues were discovered. Please review the security report."
+          else
+            echo "✅ No critical security issues detected"
+          fi
+        fi
